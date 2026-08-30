@@ -1,9 +1,8 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import { PrismaClient } from "../app/generated/prisma/client";
 
-const prisma = new PrismaClient();
+import { prisma } from "@/lib/prisma";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -24,9 +23,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           return null;
         }
 
+        const email = String(credentials.email).trim().toLowerCase();
+        const password = String(credentials.password);
+
         const user = await prisma.user.findUnique({
           where: {
-            email: credentials.email as string,
+            email,
           },
         });
 
@@ -35,8 +37,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
 
         const passwordMatch = await bcrypt.compare(
-          credentials.password as string,
-          user.passwordHash,
+          password,
+          user.passwordHash
         );
 
         if (!passwordMatch) {
@@ -60,18 +62,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
   callbacks: {
     async jwt({ token, user }) {
-  if (user) {
-    if ("role" in user) {
-      token.role = user.role;
-    }
+      if (user) {
+        if ("role" in user) {
+          token.role = user.role;
+        }
 
-    if ("workspaceId" in user) {
-      token.workspaceId = user.workspaceId;
-    }
-  }
+        if ("workspaceId" in user) {
+          token.workspaceId = user.workspaceId;
+        }
+      }
 
-  return token;
-},
+      return token;
+    },
+
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
