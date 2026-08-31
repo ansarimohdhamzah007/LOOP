@@ -1,427 +1,532 @@
-"use client";
-
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { redirect } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import LogoutButton from "./LogoutButton";
 
-type DashboardStats = {
-  totalFeedback: number;
-  positive: number;
-  neutral: number;
-  negative: number;
-  newFeedback: number;
-  reviewed: number;
-  actioned: number;
-  averageSentimentScore: number;
-};
+export const dynamic = "force-dynamic";
 
-type RecentFeedback = {
-  id: string;
-  content: string;
-  channel: string;
-  customerLabel: string | null;
-  sentiment: "POS" | "NEU" | "NEG" | null;
-  sentimentScore: number | null;
-  status: "NEW" | "REVIEWED" | "ACTIONED";
-  createdAt: string;
-};
+export default async function DashboardPage() {
+  const session = await auth();
 
-type DashboardResponse = {
-  stats: DashboardStats;
-  recentFeedback: RecentFeedback[];
-};
-
-export default function DashboardPage() {
-  const [data, setData] =
-    useState<DashboardResponse | null>(null);
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  async function loadDashboard() {
-    try {
-      setLoading(true);
-      setError("");
-
-      const response = await fetch("/api/dashboard");
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          result.error || "Unable to load dashboard."
-        );
-      }
-
-      setData(result);
-    } catch (error) {
-      console.error(error);
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Unable to load dashboard."
-      );
-    } finally {
-      setLoading(false);
-    }
+  if (!session?.user) {
+    redirect("/login");
   }
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
+  const workspaceId = session.user.workspaceId;
 
-  const stats = data?.stats;
+  // Get all feedback for the logged-in user's workspace
+  const feedback = await prisma.feedback.findMany({
+    where: {
+      workspaceId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take: 100,
+  });
+
+  // -----------------------------
+  // Analytics
+  // -----------------------------
+
+  const totalFeedback = feedback.length;
+
+  const positiveCount = feedback.filter(
+    (item) => item.sentiment === "POS"
+  ).length;
+
+  const neutralCount = feedback.filter(
+    (item) => item.sentiment === "NEU"
+  ).length;
+
+  const negativeCount = feedback.filter(
+    (item) => item.sentiment === "NEG"
+  ).length;
+
+  const newCount = feedback.filter(
+    (item) => item.status === "NEW"
+  ).length;
+
+  const reviewedCount = feedback.filter(
+    (item) => item.status === "REVIEWED"
+  ).length;
+
+  const actionedCount = feedback.filter(
+    (item) => item.status === "ACTIONED"
+  ).length;
+
+  const scoredFeedback = feedback.filter(
+    (item) => item.sentimentScore !== null
+  );
+
+  const averageSentimentScore =
+    scoredFeedback.length > 0
+      ? scoredFeedback.reduce(
+          (total, item) => total + (item.sentimentScore ?? 0),
+          0
+        ) / scoredFeedback.length
+      : null;
+
+  // Convert score to percentage
+  const averageScorePercentage =
+    averageSentimentScore !== null
+      ? Math.round(averageSentimentScore * 100)
+      : null;
+
+  // -----------------------------
+  // Helper
+  // -----------------------------
+
+  function percentage(count: number) {
+    if (totalFeedback === 0) {
+      return 0;
+    }
+
+    return Math.round((count / totalFeedback) * 100);
+  }
 
   return (
     <main className="min-h-screen bg-zinc-100 p-6 md:p-8">
       <div className="mx-auto max-w-7xl">
 
         {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 rounded-2xl bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
-
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-zinc-900">
               LOOP Dashboard
             </h1>
 
-            <p className="mt-1 text-sm text-zinc-500">
-              Feedback management and analytics
+            <p className="mt-2 text-zinc-500">
+              Feedback management workspace
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <Link
               href="/feedback"
-              className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-medium text-white hover:bg-zinc-800"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
             >
-              View Feedback
+              Feedback
+            </Link>
+
+            <Link
+              href="/reports"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+            >
+              Reports
             </Link>
 
             <LogoutButton />
           </div>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
-            {error}
-          </div>
-        )}
+        {/* User Information */}
+        <div className="mb-8 rounded-2xl bg-white p-6 shadow-sm">
+          <h2 className="mb-5 text-lg font-semibold text-zinc-900">
+            Workspace Information
+          </h2>
 
-        {/* Loading */}
-        {loading ? (
-          <div className="rounded-2xl bg-white p-12 text-center shadow-sm">
-            <p className="text-sm text-zinc-500">
-              Loading dashboard...
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+
+            <div className="rounded-xl border border-zinc-200 p-4">
+              <p className="text-sm text-zinc-500">
+                Name
+              </p>
+
+              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                {session.user.name}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 p-4">
+              <p className="text-sm text-zinc-500">
+                Email
+              </p>
+
+              <p className="mt-1 break-all text-sm font-semibold text-zinc-900">
+                {session.user.email}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 p-4">
+              <p className="text-sm text-zinc-500">
+                Role
+              </p>
+
+              <p className="mt-1 text-lg font-semibold text-zinc-900">
+                {session.user.role}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 p-4">
+              <p className="text-sm text-zinc-500">
+                Workspace
+              </p>
+
+              <p className="mt-1 break-all text-xs font-medium text-zinc-900">
+                {workspaceId}
+              </p>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Analytics Heading */}
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-zinc-900">
+            Feedback Analytics
+          </h2>
+
+          <p className="mt-1 text-sm text-zinc-500">
+            Overview of customer feedback in your workspace.
+          </p>
+        </div>
+
+        {/* Main Analytics Cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+
+          {/* Total */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Total Feedback
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-zinc-900">
+              {totalFeedback}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              All feedback entries
             </p>
           </div>
-        ) : (
-          <>
-            {/* Analytics Cards */}
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
 
-              {/* Total */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-zinc-500">
-                  Total Feedback
-                </p>
+          {/* Positive */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Positive
+            </p>
 
-                <p className="mt-3 text-4xl font-bold text-zinc-900">
-                  {stats?.totalFeedback ?? 0}
-                </p>
+            <p className="mt-3 text-3xl font-bold text-green-600">
+              {positiveCount}
+            </p>
 
-                <p className="mt-2 text-xs text-zinc-500">
-                  All feedback in workspace
-                </p>
-              </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              {percentage(positiveCount)}% of feedback
+            </p>
+          </div>
 
-              {/* Positive */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-zinc-500">
+          {/* Neutral */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Neutral
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-yellow-600">
+              {neutralCount}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              {percentage(neutralCount)}% of feedback
+            </p>
+          </div>
+
+          {/* Negative */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Negative
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-red-600">
+              {negativeCount}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              {percentage(negativeCount)}% of feedback
+            </p>
+          </div>
+
+        </div>
+
+        {/* Second Analytics Row */}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+
+          {/* NEW */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              New
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-blue-600">
+              {newCount}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              Awaiting review
+            </p>
+          </div>
+
+          {/* REVIEWED */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Reviewed
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-purple-600">
+              {reviewedCount}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              Feedback reviewed
+            </p>
+          </div>
+
+          {/* ACTIONED */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Actioned
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-emerald-600">
+              {actionedCount}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              Actions completed
+            </p>
+          </div>
+
+          {/* Average Score */}
+          <div className="rounded-2xl bg-white p-6 shadow-sm">
+            <p className="text-sm font-medium text-zinc-500">
+              Avg. Sentiment Score
+            </p>
+
+            <p className="mt-3 text-3xl font-bold text-zinc-900">
+              {averageScorePercentage !== null
+                ? `${averageScorePercentage}%`
+                : "N/A"}
+            </p>
+
+            <p className="mt-2 text-xs text-zinc-500">
+              Based on analyzed feedback
+            </p>
+          </div>
+
+        </div>
+
+        {/* Sentiment Distribution */}
+        <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-zinc-900">
+              Sentiment Distribution
+            </h2>
+
+            <p className="mt-1 text-sm text-zinc-500">
+              Breakdown of analyzed customer feedback.
+            </p>
+          </div>
+
+          <div className="space-y-5">
+
+            {/* Positive */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700">
                   Positive
-                </p>
+                </span>
 
-                <p className="mt-3 text-4xl font-bold text-green-600">
-                  {stats?.positive ?? 0}
-                </p>
-
-                <p className="mt-2 text-xs text-zinc-500">
-                  Positive feedback
-                </p>
+                <span className="text-sm text-zinc-500">
+                  {positiveCount} ({percentage(positiveCount)}%)
+                </span>
               </div>
 
-              {/* Neutral */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-zinc-500">
+              <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full bg-green-500"
+                  style={{
+                    width: `${percentage(positiveCount)}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Neutral */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700">
                   Neutral
-                </p>
+                </span>
 
-                <p className="mt-3 text-4xl font-bold text-yellow-600">
-                  {stats?.neutral ?? 0}
-                </p>
-
-                <p className="mt-2 text-xs text-zinc-500">
-                  Neutral feedback
-                </p>
+                <span className="text-sm text-zinc-500">
+                  {neutralCount} ({percentage(neutralCount)}%)
+                </span>
               </div>
 
-              {/* Negative */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
-                <p className="text-sm font-medium text-zinc-500">
+              <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full bg-yellow-400"
+                  style={{
+                    width: `${percentage(neutralCount)}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Negative */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700">
                   Negative
-                </p>
+                </span>
 
-                <p className="mt-3 text-4xl font-bold text-red-600">
-                  {stats?.negative ?? 0}
-                </p>
+                <span className="text-sm text-zinc-500">
+                  {negativeCount} ({percentage(negativeCount)}%)
+                </span>
+              </div>
 
-                <p className="mt-2 text-xs text-zinc-500">
-                  Negative feedback
-                </p>
+              <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full bg-red-500"
+                  style={{
+                    width: `${percentage(negativeCount)}%`,
+                  }}
+                />
               </div>
             </div>
 
-            {/* Second Row */}
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+          </div>
+        </div>
 
-              {/* Sentiment Overview */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
+        {/* Recent Feedback */}
+        <div className="mt-8 rounded-2xl bg-white shadow-sm">
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-semibold text-zinc-900">
-                      Sentiment Overview
-                    </h2>
+          <div className="flex items-center justify-between border-b border-zinc-100 p-6">
 
-                    <p className="mt-1 text-sm text-zinc-500">
-                      Overall feedback sentiment
-                    </p>
-                  </div>
+            <div>
+              <h2 className="text-lg font-semibold text-zinc-900">
+                Recent Feedback
+              </h2>
 
-                  <div className="text-right">
-                    <p className="text-3xl font-bold text-zinc-900">
-                      {stats?.averageSentimentScore ?? 0}%
-                    </p>
-
-                    <p className="text-xs text-zinc-500">
-                      sentiment score
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6 space-y-4">
-
-                  {/* Positive */}
-                  <div>
-                    <div className="mb-2 flex justify-between text-sm">
-                      <span className="text-zinc-600">
-                        Positive
-                      </span>
-
-                      <span className="font-medium text-zinc-900">
-                        {stats?.positive ?? 0}
-                      </span>
-                    </div>
-
-                    <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
-                      <div
-                        className="h-full rounded-full bg-green-500"
-                        style={{
-                          width: `${
-                            stats?.totalFeedback
-                              ? (stats.positive /
-                                  stats.totalFeedback) *
-                                100
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Neutral */}
-                  <div>
-                    <div className="mb-2 flex justify-between text-sm">
-                      <span className="text-zinc-600">
-                        Neutral
-                      </span>
-
-                      <span className="font-medium text-zinc-900">
-                        {stats?.neutral ?? 0}
-                      </span>
-                    </div>
-
-                    <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
-                      <div
-                        className="h-full rounded-full bg-yellow-400"
-                        style={{
-                          width: `${
-                            stats?.totalFeedback
-                              ? (stats.neutral /
-                                  stats.totalFeedback) *
-                                100
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Negative */}
-                  <div>
-                    <div className="mb-2 flex justify-between text-sm">
-                      <span className="text-zinc-600">
-                        Negative
-                      </span>
-
-                      <span className="font-medium text-zinc-900">
-                        {stats?.negative ?? 0}
-                      </span>
-                    </div>
-
-                    <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
-                      <div
-                        className="h-full rounded-full bg-red-500"
-                        style={{
-                          width: `${
-                            stats?.totalFeedback
-                              ? (stats.negative /
-                                  stats.totalFeedback) *
-                                100
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Status Overview */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm">
-
-                <h2 className="text-lg font-semibold text-zinc-900">
-                  Feedback Status
-                </h2>
-
-                <p className="mt-1 text-sm text-zinc-500">
-                  Track feedback processing
-                </p>
-
-                <div className="mt-6 grid grid-cols-3 gap-4">
-
-                  <div className="rounded-xl bg-zinc-50 p-5 text-center">
-                    <p className="text-3xl font-bold text-zinc-900">
-                      {stats?.newFeedback ?? 0}
-                    </p>
-
-                    <p className="mt-2 text-xs font-medium text-zinc-500">
-                      NEW
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-zinc-50 p-5 text-center">
-                    <p className="text-3xl font-bold text-zinc-900">
-                      {stats?.reviewed ?? 0}
-                    </p>
-
-                    <p className="mt-2 text-xs font-medium text-zinc-500">
-                      REVIEWED
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-zinc-50 p-5 text-center">
-                    <p className="text-3xl font-bold text-zinc-900">
-                      {stats?.actioned ?? 0}
-                    </p>
-
-                    <p className="mt-2 text-xs font-medium text-zinc-500">
-                      ACTIONED
-                    </p>
-                  </div>
-
-                </div>
-              </div>
+              <p className="mt-1 text-sm text-zinc-500">
+                Latest feedback received.
+              </p>
             </div>
 
-            {/* Recent Feedback */}
-            <div className="mt-5 overflow-hidden rounded-2xl bg-white shadow-sm">
+            <Link
+              href="/feedback"
+              className="text-sm font-medium text-zinc-900 hover:underline"
+            >
+              View all →
+            </Link>
 
-              <div className="flex items-center justify-between border-b p-6">
-                <div>
-                  <h2 className="text-lg font-semibold text-zinc-900">
-                    Recent Feedback
-                  </h2>
+          </div>
 
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Latest feedback from your workspace
-                  </p>
-                </div>
+          {feedback.length === 0 ? (
+            <div className="p-10 text-center text-sm text-zinc-500">
+              No feedback available yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-zinc-100">
 
-                <Link
-                  href="/feedback"
-                  className="text-sm font-medium text-zinc-900 hover:underline"
+              {feedback.slice(0, 5).map((item) => (
+                <div
+                  key={item.id}
+                  className="p-5 hover:bg-zinc-50"
                 >
-                  View all
-                </Link>
-              </div>
 
-              {!data?.recentFeedback?.length ? (
-                <div className="p-10 text-center text-sm text-zinc-500">
-                  No feedback found.
-                </div>
-              ) : (
-                <div className="divide-y">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 
-                  {data.recentFeedback.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-col gap-3 p-5 md:flex-row md:items-center md:justify-between"
-                    >
+                    <div className="min-w-0">
+                      <p className="line-clamp-2 text-sm font-medium text-zinc-900">
+                        {item.content}
+                      </p>
 
-                      <div className="min-w-0">
-                        <p className="truncate font-medium text-zinc-900">
-                          {item.content}
-                        </p>
-
-                        <p className="mt-1 text-xs text-zinc-500">
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+                        <span>
                           {item.customerLabel || "Unknown customer"}
-                          {" · "}
+                        </span>
+
+                        <span>•</span>
+
+                        <span>
                           {item.channel}
-                        </p>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-3">
-
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-medium ${
-                            item.sentiment === "POS"
-                              ? "bg-green-100 text-green-700"
-                              : item.sentiment === "NEG"
-                              ? "bg-red-100 text-red-700"
-                              : item.sentiment === "NEU"
-                              ? "bg-yellow-100 text-yellow-700"
-                              : "bg-zinc-100 text-zinc-600"
-                          }`}
-                        >
-                          {item.sentiment || "NOT ANALYZED"}
                         </span>
-
-                        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
-                          {item.status}
-                        </span>
-
                       </div>
                     </div>
-                  ))}
+
+                    <div className="flex shrink-0 items-center gap-2">
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          item.sentiment === "POS"
+                            ? "bg-green-100 text-green-700"
+                            : item.sentiment === "NEG"
+                            ? "bg-red-100 text-red-700"
+                            : item.sentiment === "NEU"
+                            ? "bg-yellow-100 text-yellow-700"
+                            : "bg-zinc-100 text-zinc-600"
+                        }`}
+                      >
+                        {item.sentiment || "Not analyzed"}
+                      </span>
+
+                      <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
+                        {item.status}
+                      </span>
+
+                    </div>
+
+                  </div>
 
                 </div>
-              )}
+              ))}
+
             </div>
-          </>
-        )}
+          )}
+
+        </div>
+
+        {/* Quick Actions */}
+        <div className="mt-8 grid gap-4 md:grid-cols-2">
+
+          <Link
+            href="/feedback"
+            className="rounded-2xl bg-zinc-900 p-6 text-white shadow-sm transition hover:bg-zinc-800"
+          >
+            <h3 className="text-lg font-semibold">
+              Manage Feedback
+            </h3>
+
+            <p className="mt-2 text-sm text-zinc-300">
+              Add, search and manage customer feedback.
+            </p>
+
+            <p className="mt-4 text-sm font-medium">
+              Open Feedback →
+            </p>
+          </Link>
+
+          <Link
+            href="/reports"
+            className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:bg-zinc-50"
+          >
+            <h3 className="text-lg font-semibold text-zinc-900">
+              Reports & Analytics
+            </h3>
+
+            <p className="mt-2 text-sm text-zinc-500">
+              View detailed analytics and generate reports.
+            </p>
+
+            <p className="mt-4 text-sm font-medium text-zinc-900">
+              Open Reports →
+            </p>
+          </Link>
+
+        </div>
+
       </div>
     </main>
   );

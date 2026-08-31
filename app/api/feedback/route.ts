@@ -1,255 +1,274 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { classifyFeedback } from "@/lib/ai";
 
-function analyzeSentiment(text: string) {
-  const positiveWords = [
-    "good",
-    "great",
-    "excellent",
-    "amazing",
-    "helpful",
-    "love",
-    "happy",
-    "awesome",
-    "perfect",
-    "fast",
-    "easy",
-    "friendly",
-    "satisfied",
-    "best",
-    "wonderful",
-  ];
+export const dynamic = "force-dynamic";
 
-  const negativeWords = [
-    "bad",
-    "poor",
-    "terrible",
-    "awful",
-    "hate",
-    "angry",
-    "slow",
-    "late",
-    "delay",
-    "delayed",
-    "problem",
-    "issue",
-    "worst",
-    "horrible",
-    "disappointed",
-    "unhappy",
-    "difficult",
-  ];
-
-  const words = text.toLowerCase().split(/\s+/);
-
-  let positive = 0;
-  let negative = 0;
-
-  for (const word of words) {
-    const cleanWord = word.replace(/[.,!?;:"()]/g, "");
-
-    if (positiveWords.includes(cleanWord)) {
-      positive++;
-    }
-
-    if (negativeWords.includes(cleanWord)) {
-      negative++;
-    }
-  }
-
-  if (positive === 0 && negative === 0) {
-    return {
-      sentiment: "NEU" as const,
-      sentimentScore: 0.5,
-    };
-  }
-
-  if (positive > negative) {
-    const score = Math.min(
-      0.99,
-      0.5 + positive * 0.1 - negative * 0.05
-    );
-
-    return {
-      sentiment: "POS" as const,
-      sentimentScore: Number(score.toFixed(2)),
-    };
-  }
-
-  if (negative > positive) {
-    const score = Math.min(
-      0.99,
-      0.5 + negative * 0.1 - positive * 0.05
-    );
-
-    return {
-      sentiment: "NEG" as const,
-      sentimentScore: Number(score.toFixed(2)),
-    };
-  }
-
-  return {
-    sentiment: "NEU" as const,
-    sentimentScore: 0.5,
-  };
-}
+// =====================================================
+// GET THEMES
+// =====================================================
 
 export async function GET() {
   try {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user?.workspaceId) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const feedback = await prisma.feedback.findMany({
+    const workspaceId = session.user.workspaceId;
+
+    const themes = await prisma.theme.findMany({
       where: {
-        workspaceId: session.user.workspaceId,
+        workspaceId,
+      },
+      include: {
+        feedback: {
+          include: {
+            feedback: true,
+          },
+        },
       },
       orderBy: {
-        createdAt: "desc",
+        name: "asc",
       },
     });
 
-    return NextResponse.json(feedback);
+    const result = themes.map((theme) => {
+      let positive = 0;
+      let neutral = 0;
+      let negative = 0;
+
+      for (const relation of theme.feedback) {
+        const sentiment = relation.feedback.sentiment;
+
+        if (sentiment === "POS") positive++;
+        if (sentiment === "NEU") neutral++;
+        if (sentiment === "NEG") negative++;
+      }
+
+      return {
+        id: theme.id,
+        name: theme.name,
+        description: theme.description,
+        color: theme.color,
+        feedbackCount: theme.feedback.length,
+        sentiment: {
+          positive,
+          neutral,
+          negative,
+        },
+      };
+    });
+
+    return NextResponse.json(result);
   } catch (error) {
-    console.error("Get feedback error:", error);
+    console.error("Themes GET error:", error);
 
     return NextResponse.json(
-      { error: "Unable to fetch feedback." },
+      { error: "Unable to load themes." },
       { status: 500 }
     );
   }
 }
 
-export async function POST(request: Request) {
+// =====================================================
+// POST - CATEGORIZE ALL EXISTING FEEDBACK
+// =====================================================
+
+export async function POST() {
   try {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user?.workspaceId) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const body = await request.json();
+    const workspaceId = session.user.workspaceId;
 
-    const content = body.content?.trim();
-    const channel = body.channel?.trim();
-    const customerLabel = body.customerLabel?.trim();
-    const sourceRef = body.sourceRef?.trim();
-
-    if (!content || !channel) {
-      return NextResponse.json(
-        {
-          error:
-            "Feedback content and channel are required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Automatically analyze sentiment
-    const analysis = analyzeSentiment(content);
-
-    const feedback = await prisma.feedback.create({
-      data: {
-        content,
-        channel,
-        customerLabel: customerLabel || null,
-        sourceRef: sourceRef || null,
-        sentiment: analysis.sentiment,
-        sentimentScore: analysis.sentimentScore,
-        workspaceId: session.user.workspaceId,
-      },
-    });
-
-    return NextResponse.json(feedback, {
-      status: 201,
-    });
-  } catch (error) {
-    console.error("Create feedback error:", error);
-
-    return NextResponse.json(
-      { error: "Unable to create feedback." },
-      { status: 500 }
-    );
-  }
-}
-
-export async function PATCH(request: Request) {
-  try {
-    const session = await auth();
-
-    if (!session?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const body = await request.json();
-
-    const id = body.id;
-    const status = body.status;
-
-    if (!id || !status) {
-      return NextResponse.json(
-        {
-          error: "Feedback ID and status are required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const allowedStatuses = [
-      "NEW",
-      "REVIEWED",
-      "ACTIONED",
-    ];
-
-    if (!allowedStatuses.includes(status)) {
-      return NextResponse.json(
-        { error: "Invalid feedback status." },
-        { status: 400 }
-      );
-    }
-
-    const existingFeedback =
-      await prisma.feedback.findFirst({
-        where: {
-          id,
-          workspaceId: session.user.workspaceId,
-        },
-      });
-
-    if (!existingFeedback) {
-      return NextResponse.json(
-        { error: "Feedback not found." },
-        { status: 404 }
-      );
-    }
-
-    const updatedFeedback = await prisma.feedback.update({
+    // Get all feedback from current workspace
+    const feedback = await prisma.feedback.findMany({
       where: {
-        id,
+        workspaceId,
       },
-      data: {
-        status,
+      orderBy: {
+        createdAt: "asc",
       },
     });
 
-    return NextResponse.json(updatedFeedback);
+    if (feedback.length === 0) {
+      return NextResponse.json({
+        message: "No feedback found.",
+        processed: 0,
+        themesCreated: 0,
+        linksCreated: 0,
+      });
+    }
+
+    let processed = 0;
+    let themesCreated = 0;
+    let linksCreated = 0;
+
+    // =================================================
+    // PROCESS EACH FEEDBACK
+    // =================================================
+
+    for (const item of feedback) {
+      try {
+        // Get current workspace themes
+        const existingThemes = await prisma.theme.findMany({
+          where: {
+            workspaceId,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        });
+
+        const themeNames = existingThemes.map(
+          (theme) => theme.name
+        );
+
+        // ---------------------------------------------
+        // AI CLASSIFICATION
+        // ---------------------------------------------
+
+        const analysis = await classifyFeedback(
+          item.content,
+          themeNames
+        );
+
+        // ---------------------------------------------
+        // UPDATE SENTIMENT
+        // ---------------------------------------------
+
+        await prisma.feedback.update({
+          where: {
+            id: item.id,
+          },
+          data: {
+            sentiment: analysis.sentiment,
+            sentimentScore: analysis.sentimentScore,
+          },
+        });
+
+        // ---------------------------------------------
+        // THEMES
+        // ---------------------------------------------
+
+        let themeNamesToProcess = [
+          ...(analysis.themes || []),
+        ];
+
+        // Fallback to featureArea
+        if (
+          themeNamesToProcess.length === 0 &&
+          analysis.featureArea
+        ) {
+          themeNamesToProcess = [
+            analysis.featureArea,
+          ];
+        }
+
+        // ---------------------------------------------
+        // CREATE / FIND THEMES
+        // ---------------------------------------------
+
+        for (const rawThemeName of themeNamesToProcess) {
+          const themeName =
+            typeof rawThemeName === "string"
+              ? rawThemeName.trim()
+              : "";
+
+          if (!themeName) {
+            continue;
+          }
+
+          let theme = await prisma.theme.findFirst({
+            where: {
+              workspaceId,
+              name: {
+                equals: themeName,
+                mode: "insensitive",
+              },
+            },
+          });
+
+          // Create theme if not found
+          if (!theme) {
+            theme = await prisma.theme.create({
+              data: {
+                name: themeName,
+                description:
+                  `${themeName} related customer feedback`,
+                color: "#6366f1",
+                workspaceId,
+              },
+            });
+
+            themesCreated++;
+          }
+
+          // -------------------------------------------
+          // CHECK EXISTING LINK
+          // -------------------------------------------
+
+          const existingLink =
+            await prisma.feedbackTheme.findFirst({
+              where: {
+                feedbackId: item.id,
+                themeId: theme.id,
+              },
+            });
+
+          // -------------------------------------------
+          // CREATE LINK
+          // -------------------------------------------
+
+          if (!existingLink) {
+            await prisma.feedbackTheme.create({
+              data: {
+                feedbackId: item.id,
+                themeId: theme.id,
+                confidence: 1,
+              },
+            });
+
+            linksCreated++;
+          }
+        }
+
+        processed++;
+      } catch (error) {
+        console.error(
+          `Failed to process feedback ${item.id}:`,
+          error
+        );
+      }
+    }
+
+    return NextResponse.json({
+      message: "Feedback categorized successfully.",
+      processed,
+      totalFeedback: feedback.length,
+      themesCreated,
+      linksCreated,
+    });
   } catch (error) {
-    console.error("Update feedback error:", error);
+    console.error("Themes POST error:", error);
 
     return NextResponse.json(
-      { error: "Unable to update feedback." },
+      {
+        error: "Unable to categorize feedback.",
+      },
       { status: 500 }
     );
   }

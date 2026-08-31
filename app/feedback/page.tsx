@@ -18,6 +18,10 @@ export default function FeedbackPage() {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [search, setSearch] = useState("");
 
+  const [sentimentFilter, setSentimentFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [channelFilter, setChannelFilter] = useState("ALL");
+
   const [showForm, setShowForm] = useState(false);
   const [content, setContent] = useState("");
   const [channel, setChannel] = useState("Email");
@@ -160,11 +164,32 @@ export default function FeedbackPage() {
     }
   }
 
-  const filteredFeedback = feedback.filter((item) =>
-    `${item.content} ${item.customerLabel ?? ""} ${item.channel}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  const filteredFeedback = feedback.filter((item) => {
+    const searchText =
+      `${item.content} ${item.customerLabel ?? ""} ${item.channel}`
+        .toLowerCase();
+
+    const matchesSearch = searchText.includes(search.toLowerCase());
+
+    const matchesSentiment =
+      sentimentFilter === "ALL" ||
+      item.sentiment === sentimentFilter;
+
+    const matchesStatus =
+      statusFilter === "ALL" ||
+      item.status === statusFilter;
+
+    const matchesChannel =
+      channelFilter === "ALL" ||
+      item.channel === channelFilter;
+
+    return (
+      matchesSearch &&
+      matchesSentiment &&
+      matchesStatus &&
+      matchesChannel
+    );
+  });
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
@@ -299,7 +324,7 @@ export default function FeedbackPage() {
           </form>
         )}
 
-        {/* Search */}
+        {/* Search & Filters */}
         <div className="mb-5 rounded-xl border bg-white p-4 shadow-sm">
           <input
             type="text"
@@ -310,6 +335,53 @@ export default function FeedbackPage() {
             }
             className="w-full rounded-lg border px-4 py-2.5 text-sm outline-none focus:border-black"
           />
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {/* Sentiment Filter */}
+            <select
+              value={sentimentFilter}
+              onChange={(e) =>
+                setSentimentFilter(e.target.value)
+              }
+              className="rounded-lg border px-4 py-2.5 text-sm outline-none focus:border-black"
+            >
+              <option value="ALL">All Sentiments</option>
+              <option value="POS">Positive</option>
+              <option value="NEU">Neutral</option>
+              <option value="NEG">Negative</option>
+            </select>
+
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) =>
+                setStatusFilter(e.target.value)
+              }
+              className="rounded-lg border px-4 py-2.5 text-sm outline-none focus:border-black"
+            >
+              <option value="ALL">All Status</option>
+              <option value="NEW">New</option>
+              <option value="REVIEWED">Reviewed</option>
+              <option value="ACTIONED">Actioned</option>
+            </select>
+
+            {/* Channel Filter */}
+            <select
+              value={channelFilter}
+              onChange={(e) =>
+                setChannelFilter(e.target.value)
+              }
+              className="rounded-lg border px-4 py-2.5 text-sm outline-none focus:border-black"
+            >
+              <option value="ALL">All Channels</option>
+              <option value="Email">Email</option>
+              <option value="WhatsApp">WhatsApp</option>
+              <option value="Website">Website</option>
+              <option value="Phone">Phone</option>
+              <option value="Social Media">Social Media</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
         </div>
 
         {/* Table */}

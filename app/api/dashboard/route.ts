@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const session = await auth();
 
-    if (!session?.user) {
+    if (!session?.user?.workspaceId) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
@@ -15,116 +17,74 @@ export async function GET() {
 
     const workspaceId = session.user.workspaceId;
 
-    const [
-      totalFeedback,
-      positive,
-      neutral,
-      negative,
-      newFeedback,
-      reviewed,
-      actioned,
-    ] = await Promise.all([
-      prisma.feedback.count({
-        where: { workspaceId },
-      }),
+    const feedback = await prisma.feedback.findMany({
+      where: {
+        workspaceId,
+      },
+      select: {
+        sentiment: true,
+        status: true,
+        sentimentScore: true,
+      },
+    });
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          sentiment: "POS",
-        },
-      }),
+    const total = feedback.length;
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          sentiment: "NEU",
-        },
-      }),
+    const positive = feedback.filter(
+      (item) => item.sentiment === "POS"
+    ).length;
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          sentiment: "NEG",
-        },
-      }),
+    const neutral = feedback.filter(
+      (item) => item.sentiment === "NEU"
+    ).length;
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          status: "NEW",
-        },
-      }),
+    const negative = feedback.filter(
+      (item) => item.sentiment === "NEG"
+    ).length;
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          status: "REVIEWED",
-        },
-      }),
+    const newCount = feedback.filter(
+      (item) => item.status === "NEW"
+    ).length;
 
-      prisma.feedback.count({
-        where: {
-          workspaceId,
-          status: "ACTIONED",
-        },
-      }),
-    ]);
+    const reviewed = feedback.filter(
+      (item) => item.status === "REVIEWED"
+    ).length;
 
-    const analyzed =
-      positive + neutral + negative;
+    const actioned = feedback.filter(
+      (item) => item.status === "ACTIONED"
+    ).length;
+
+    const scores = feedback
+      .map((item) => item.sentimentScore)
+      .filter(
+        (score): score is number => score !== null
+      );
 
     const averageSentimentScore =
-      analyzed > 0
-        ? Math.round(
-            ((positive * 100) +
-              (neutral * 50) +
-              (negative * 0)) /
-              analyzed
-          )
-        : 0;
-
-    const recentFeedback =
-      await prisma.feedback.findMany({
-        where: {
-          workspaceId,
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 5,
-        select: {
-          id: true,
-          content: true,
-          channel: true,
-          customerLabel: true,
-          sentiment: true,
-          sentimentScore: true,
-          status: true,
-          createdAt: true,
-        },
-      });
+      scores.length > 0
+        ? scores.reduce((sum, score) => sum + score, 0) /
+          scores.length
+        : null;
 
     return NextResponse.json({
-      stats: {
-        totalFeedback,
+      total,
+      sentiment: {
         positive,
         neutral,
         negative,
-        newFeedback,
+      },
+      status: {
+        new: newCount,
         reviewed,
         actioned,
-        averageSentimentScore,
       },
-      recentFeedback,
+      averageSentimentScore,
     });
   } catch (error) {
-    console.error("Dashboard error:", error);
+    console.error("Dashboard API error:", error);
 
     return NextResponse.json(
-      {
-        error: "Unable to load dashboard analytics.",
-      },
+      { error: "Unable to load dashboard data." },
       { status: 500 }
     );
   }
