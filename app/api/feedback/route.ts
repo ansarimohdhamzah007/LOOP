@@ -6,7 +6,7 @@ import { classifyFeedback } from "@/lib/ai";
 export const dynamic = "force-dynamic";
 
 // =====================================================
-// GET THEMES
+// GET - LOAD FEEDBACK
 // =====================================================
 
 export async function GET() {
@@ -22,254 +22,541 @@ export async function GET() {
 
     const workspaceId = session.user.workspaceId;
 
-    const themes = await prisma.theme.findMany({
-      where: {
-        workspaceId,
-      },
-      include: {
-        feedback: {
-          include: {
-            feedback: true,
-          },
-        },
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
-
-    const result = themes.map((theme) => {
-      let positive = 0;
-      let neutral = 0;
-      let negative = 0;
-
-      for (const relation of theme.feedback) {
-        const sentiment = relation.feedback.sentiment;
-
-        if (sentiment === "POS") positive++;
-        if (sentiment === "NEU") neutral++;
-        if (sentiment === "NEG") negative++;
-      }
-
-      return {
-        id: theme.id,
-        name: theme.name,
-        description: theme.description,
-        color: theme.color,
-        feedbackCount: theme.feedback.length,
-        sentiment: {
-          positive,
-          neutral,
-          negative,
-        },
-      };
-    });
-
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Themes GET error:", error);
-
-    return NextResponse.json(
-      { error: "Unable to load themes." },
-      { status: 500 }
-    );
-  }
-}
-
-// =====================================================
-// POST - CATEGORIZE ALL EXISTING FEEDBACK
-// =====================================================
-
-export async function POST() {
-  try {
-    const session = await auth();
-
-    if (!session?.user?.workspaceId) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const workspaceId = session.user.workspaceId;
-
-    // Get all feedback from current workspace
     const feedback = await prisma.feedback.findMany({
       where: {
         workspaceId,
       },
       orderBy: {
-        createdAt: "asc",
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        content: true,
+        channel: true,
+        customerLabel: true,
+        sourceRef: true,
+        sentiment: true,
+        sentimentScore: true,
+        status: true,
+        createdAt: true,
       },
     });
 
-    if (feedback.length === 0) {
-      return NextResponse.json({
-        message: "No feedback found.",
-        processed: 0,
-        themesCreated: 0,
-        linksCreated: 0,
-      });
+    return NextResponse.json(feedback);
+  } catch (error) {
+    console.error("Feedback GET error:", error);
+
+    return NextResponse.json(
+      {
+        error: "Unable to load feedback.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+
+// =====================================================
+// POST - CREATE NEW FEEDBACK + AI ANALYSIS
+// =====================================================
+
+export async function POST(
+  request: Request
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user?.workspaceId) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+        },
+        {
+          status: 401,
+        }
+      );
     }
 
-    let processed = 0;
-    let themesCreated = 0;
-    let linksCreated = 0;
+    const workspaceId =
+      session.user.workspaceId;
 
-    // =================================================
-    // PROCESS EACH FEEDBACK
-    // =================================================
+    // -------------------------------------------------
+    // READ REQUEST BODY
+    // -------------------------------------------------
 
-    for (const item of feedback) {
-      try {
-        // Get current workspace themes
-        const existingThemes = await prisma.theme.findMany({
+    const body = await request.json();
+
+    const content =
+      typeof body.content === "string"
+        ? body.content.trim()
+        : "";
+
+    const channel =
+      typeof body.channel === "string" &&
+      body.channel.trim()
+        ? body.channel.trim()
+        : "Other";
+
+    const customerLabel =
+      typeof body.customerLabel === "string"
+        ? body.customerLabel.trim() || null
+        : null;
+
+    const sourceRef =
+      typeof body.sourceRef === "string"
+        ? body.sourceRef.trim() || null
+        : null;
+
+    if (!content) {
+      return NextResponse.json(
+        {
+          error: "Feedback content is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // -------------------------------------------------
+    // GET EXISTING THEMES
+    // -------------------------------------------------
+
+    const existingThemes =
+      await prisma.theme.findMany({
+        where: {
+          workspaceId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+        orderBy: {
+          name: "asc",
+        },
+      });
+
+    const existingThemeNames =
+      existingThemes.map(
+        (theme) => theme.name
+      );
+
+    // -------------------------------------------------
+    // CREATE FEEDBACK FIRST
+    // -------------------------------------------------
+
+    const feedback =
+      await prisma.feedback.create({
+        data: {
+          content,
+          channel,
+          customerLabel,
+          sourceRef,
+          status: "NEW",
+          workspaceId,
+        },
+      });
+
+    console.log(
+      `Feedback created: ${feedback.id}`
+    );
+
+    // -------------------------------------------------
+    // AI CLASSIFICATION
+    // -------------------------------------------------
+
+    let analysis: Awaited<
+      ReturnType<typeof classifyFeedback>
+    > | null = null;
+
+    try {
+      console.log(
+        `Starting AI classification for ${feedback.id}`
+      );
+
+      analysis =
+        await classifyFeedback(
+          content,
+          existingThemeNames
+        );
+
+      console.log(
+        "AI classification result:",
+        analysis
+      );
+    } catch (error) {
+      console.error(
+        `AI classification failed for ${feedback.id}:`,
+        error
+      );
+
+      /*
+       * IMPORTANT:
+       * Feedback has already been saved.
+       *
+       * If AI fails, we keep the feedback in DB
+       * instead of deleting it.
+       */
+
+      const savedFeedback =
+        await prisma.feedback.findUnique({
           where: {
-            workspaceId,
+            id: feedback.id,
           },
           select: {
             id: true,
-            name: true,
+            content: true,
+            channel: true,
+            customerLabel: true,
+            sourceRef: true,
+            sentiment: true,
+            sentimentScore: true,
+            status: true,
+            createdAt: true,
           },
         });
 
-        const themeNames = existingThemes.map(
-          (theme) => theme.name
-        );
-
-        // ---------------------------------------------
-        // AI CLASSIFICATION
-        // ---------------------------------------------
-
-        const analysis = await classifyFeedback(
-          item.content,
-          themeNames
-        );
-
-        // ---------------------------------------------
-        // UPDATE SENTIMENT
-        // ---------------------------------------------
-
-        await prisma.feedback.update({
-          where: {
-            id: item.id,
-          },
-          data: {
-            sentiment: analysis.sentiment,
-            sentimentScore: analysis.sentimentScore,
-          },
-        });
-
-        // ---------------------------------------------
-        // THEMES
-        // ---------------------------------------------
-
-        let themeNamesToProcess = [
-          ...(analysis.themes || []),
-        ];
-
-        // Fallback to featureArea
-        if (
-          themeNamesToProcess.length === 0 &&
-          analysis.featureArea
-        ) {
-          themeNamesToProcess = [
-            analysis.featureArea,
-          ];
+      return NextResponse.json(
+        {
+          ...savedFeedback,
+          aiAnalyzed: false,
+          aiError:
+            "AI classification failed. Feedback was saved successfully.",
+        },
+        {
+          status: 201,
         }
+      );
+    }
 
-        // ---------------------------------------------
-        // CREATE / FIND THEMES
-        // ---------------------------------------------
+    // -------------------------------------------------
+    // UPDATE SENTIMENT
+    // -------------------------------------------------
 
-        for (const rawThemeName of themeNamesToProcess) {
-          const themeName =
-            typeof rawThemeName === "string"
-              ? rawThemeName.trim()
-              : "";
+    await prisma.feedback.update({
+      where: {
+        id: feedback.id,
+      },
+      data: {
+        sentiment: analysis.sentiment,
+        sentimentScore:
+          analysis.sentimentScore,
+      },
+    });
 
-          if (!themeName) {
-            continue;
-          }
+    console.log(
+      `Sentiment saved for ${feedback.id}`
+    );
 
-          let theme = await prisma.theme.findFirst({
-            where: {
+    // -------------------------------------------------
+    // PREPARE THEMES
+    // -------------------------------------------------
+
+    let themeNamesToProcess =
+      Array.isArray(analysis.themes)
+        ? analysis.themes
+        : [];
+
+    /*
+     * Fallback:
+     * If Gemini somehow doesn't return themes,
+     * use featureArea.
+     */
+
+    if (
+      themeNamesToProcess.length === 0 &&
+      analysis.featureArea
+    ) {
+      themeNamesToProcess = [
+        analysis.featureArea,
+      ];
+    }
+
+    // -------------------------------------------------
+    // CREATE / FIND THEMES
+    // -------------------------------------------------
+
+    for (const rawThemeName of themeNamesToProcess) {
+      const themeName =
+        typeof rawThemeName === "string"
+          ? rawThemeName.trim()
+          : "";
+
+      if (!themeName) {
+        continue;
+      }
+
+      // -----------------------------------------------
+      // FIND EXISTING THEME
+      // -----------------------------------------------
+
+      let theme =
+        await prisma.theme.findFirst({
+          where: {
+            workspaceId,
+            name: {
+              equals: themeName,
+              mode: "insensitive",
+            },
+          },
+        });
+
+      // -----------------------------------------------
+      // CREATE THEME IF NEEDED
+      // -----------------------------------------------
+
+      if (!theme) {
+        theme =
+          await prisma.theme.create({
+            data: {
+              name: themeName,
+              description:
+                `${themeName} related customer feedback`,
+              color: "#6366f1",
               workspaceId,
-              name: {
-                equals: themeName,
-                mode: "insensitive",
-              },
             },
           });
 
-          // Create theme if not found
-          if (!theme) {
-            theme = await prisma.theme.create({
-              data: {
-                name: themeName,
-                description:
-                  `${themeName} related customer feedback`,
-                color: "#6366f1",
-                workspaceId,
-              },
-            });
+        console.log(
+          `Created new theme: ${themeName}`
+        );
+      }
 
-            themesCreated++;
-          }
+      // -----------------------------------------------
+      // CHECK EXISTING FEEDBACK-THEME LINK
+      // -----------------------------------------------
 
-          // -------------------------------------------
-          // CHECK EXISTING LINK
-          // -------------------------------------------
+      const existingLink =
+        await prisma.feedbackTheme.findUnique({
+          where: {
+            feedbackId_themeId: {
+              feedbackId: feedback.id,
+              themeId: theme.id,
+            },
+          },
+        });
 
-          const existingLink =
-            await prisma.feedbackTheme.findFirst({
-              where: {
-                feedbackId: item.id,
-                themeId: theme.id,
-              },
-            });
+      // -----------------------------------------------
+      // CREATE LINK
+      // -----------------------------------------------
 
-          // -------------------------------------------
-          // CREATE LINK
-          // -------------------------------------------
+      if (!existingLink) {
+        await prisma.feedbackTheme.create({
+          data: {
+            feedbackId: feedback.id,
+            themeId: theme.id,
+            confidence: 1,
+          },
+        });
 
-          if (!existingLink) {
-            await prisma.feedbackTheme.create({
-              data: {
-                feedbackId: item.id,
-                themeId: theme.id,
-                confidence: 1,
-              },
-            });
-
-            linksCreated++;
-          }
-        }
-
-        processed++;
-      } catch (error) {
-        console.error(
-          `Failed to process feedback ${item.id}:`,
-          error
+        console.log(
+          `Linked ${feedback.id} -> ${theme.name}`
         );
       }
     }
 
-    return NextResponse.json({
-      message: "Feedback categorized successfully.",
-      processed,
-      totalFeedback: feedback.length,
-      themesCreated,
-      linksCreated,
-    });
-  } catch (error) {
-    console.error("Themes POST error:", error);
+    // -------------------------------------------------
+    // GET FINAL FEEDBACK
+    // -------------------------------------------------
+
+    const finalFeedback =
+      await prisma.feedback.findUnique({
+        where: {
+          id: feedback.id,
+        },
+        select: {
+          id: true,
+          content: true,
+          channel: true,
+          customerLabel: true,
+          sourceRef: true,
+          sentiment: true,
+          sentimentScore: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+
+    // -------------------------------------------------
+    // RETURN SUCCESS
+    // -------------------------------------------------
 
     return NextResponse.json(
       {
-        error: "Unable to categorize feedback.",
+        ...finalFeedback,
+        aiAnalyzed: true,
+        analysis: {
+          themes: analysis.themes,
+          featureArea:
+            analysis.featureArea ?? null,
+          rationale: analysis.rationale,
+        },
       },
-      { status: 500 }
+      {
+        status: 201,
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Feedback POST error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to create feedback.",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
+}
+
+// =====================================================
+// PATCH - UPDATE FEEDBACK STATUS
+// =====================================================
+
+export async function PATCH(
+  request: Request
+) {
+  try {
+    const session = await auth();
+
+    if (!session?.user?.workspaceId) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    const workspaceId =
+      session.user.workspaceId;
+
+    // -------------------------------------------------
+    // READ BODY
+    // -------------------------------------------------
+
+    const body = await request.json();
+
+    const id =
+      typeof body.id === "string"
+        ? body.id.trim()
+        : "";
+
+    const status = body.status;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          error: "Feedback ID is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // -------------------------------------------------
+    // VALIDATE STATUS
+    // -------------------------------------------------
+
+    const validStatuses = [
+      "NEW",
+      "REVIEWED",
+      "ACTIONED",
+    ] as const;
+
+    if (
+      !validStatuses.includes(status)
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Invalid feedback status.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    // -------------------------------------------------
+    // CHECK FEEDBACK BELONGS TO WORKSPACE
+    // -------------------------------------------------
+
+    const existingFeedback =
+      await prisma.feedback.findFirst({
+        where: {
+          id,
+          workspaceId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!existingFeedback) {
+      return NextResponse.json(
+        {
+          error: "Feedback not found.",
+        },
+        {
+          status: 404,
+        }
+      );
+    }
+
+    // -------------------------------------------------
+    // UPDATE STATUS
+    // -------------------------------------------------
+
+    const updated =
+      await prisma.feedback.update({
+        where: {
+          id,
+        },
+        data: {
+          status,
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+    // -------------------------------------------------
+    // RETURN SUCCESS
+    // -------------------------------------------------
+
+    return NextResponse.json({
+      id: updated.id,
+      status: updated.status,
+    });
+  } catch (error) {
+    console.error(
+      "Feedback PATCH error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to update feedback.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }

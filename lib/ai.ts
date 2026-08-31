@@ -1,55 +1,103 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+/*
+ * =====================================================
+ * GEMINI CLIENT
+ * =====================================================
+ */
+
+const apiKey = process.env.GEMINI_API_KEY;
+
+const ai = apiKey
+  ? new GoogleGenAI({
+      apiKey,
+    })
+  : null;
+
+/*
+ * =====================================================
+ * CLASSIFICATION SCHEMA
+ * =====================================================
+ */
 
 const classificationSchema = z.object({
   sentiment: z.enum(["POS", "NEU", "NEG"]),
 
-  sentimentScore: z
-    .number()
-    .min(-1)
-    .max(1),
+  sentimentScore: z.number().min(-1).max(1),
 
-  themes: z
-    .array(z.string())
-    .min(1)
-    .max(5),
+  themes: z.array(z.string()).min(1).max(5),
 
-  featureArea: z
-    .string()
-    .nullable()
-    .optional(),
+  featureArea: z.string().nullable().optional(),
 
   rationale: z.string(),
 });
 
-export type FeedbackClassification = z.infer<
-  typeof classificationSchema
->;
+/*
+ * =====================================================
+ * TYPE
+ * =====================================================
+ */
+
+export type FeedbackClassification =
+  z.infer<typeof classificationSchema>;
+
+/*
+ * =====================================================
+ * CLASSIFY FEEDBACK
+ * =====================================================
+ */
 
 export async function classifyFeedback(
   content: string,
   existingThemes: string[]
 ): Promise<FeedbackClassification> {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  /*
+   * ---------------------------------------------------
+   * CHECK API KEY
+   * ---------------------------------------------------
+   */
+
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not configured"
+      "GEMINI_API_KEY is not configured."
     );
   }
+
+  /*
+   * ---------------------------------------------------
+   * CHECK CLIENT
+   * ---------------------------------------------------
+   */
+
+  if (!ai) {
+    throw new Error(
+      "Gemini AI client could not be initialized."
+    );
+  }
+
+  /*
+   * ---------------------------------------------------
+   * EXISTING THEMES
+   * ---------------------------------------------------
+   */
 
   const themeList =
     existingThemes.length > 0
       ? existingThemes.join(", ")
-      : "No themes exist yet. You MUST create suitable themes.";
+      : "No existing themes.";
+
+  /*
+   * ---------------------------------------------------
+   * PROMPT
+   * ---------------------------------------------------
+   */
 
   const prompt = `
 You are the AI classification engine for LOOP,
 a customer feedback analytics platform.
 
-Analyze this customer feedback:
+Analyze the following customer feedback.
 
 CUSTOMER FEEDBACK:
 ${content}
@@ -57,128 +105,278 @@ ${content}
 EXISTING THEMES:
 ${themeList}
 
-IMPORTANT THEME RULES:
+CLASSIFICATION RULES:
 
-1. Always return at least ONE theme.
+1. Return exactly one sentiment:
+POS, NEU, or NEG.
 
-2. If an existing theme clearly matches the feedback,
-   use that existing theme.
+2. sentimentScore must be between -1 and 1.
 
-3. Choose a relevant existing theme whenever possible.
+3. Always return at least one theme.
 
-4. If no existing theme is suitable, create a new concise theme name based on the feedback.
+4. Prefer an existing theme if it clearly matches.
 
-5. Theme names should be short and meaningful.
-   Examples:
-   Support, Pricing, Delivery, Performance, UX, Billing, Account, Features
+5. If no existing theme matches, create a short,
+meaningful theme.
 
-6. Do not create multiple themes unless the feedback clearly belongs to multiple topics.
-7. A feedback can have multiple relevant themes,
-   but normally return only 1-3 themes.
+6. Normally return only 1-3 themes.
 
-SENTIMENT RULES:
+7. Identify the main feature area.
 
-sentiment must be exactly:
+8. If no feature area can be identified,
+return null.
 
-POS
-NEU
-NEG
+9. Give a short one-sentence rationale.
 
-sentimentScore must be between -1 and 1.
+VALID THEME EXAMPLES:
+
+Support
+Pricing
+Delivery
+Performance
+UX
+Billing
+Account
+Features
+Product
+Authentication
+Mobile App
+Website
+
+SENTIMENT:
+
+POS = positive
+NEU = neutral, factual, or mixed
+NEG = negative
+
+SCORE:
 
 -1 = extremely negative
+-0.5 = moderately negative
 0 = neutral
-+1 = extremely positive
+0.5 = moderately positive
+1 = extremely positive
 
-FEATURE AREA:
+IMPORTANT:
 
-Identify the main product or business area.
+Return ONLY valid JSON.
 
-Examples:
-Customer Support
-Delivery
-Product
-Pricing
-Billing
-UX
-Account
-Performance
+Do NOT use markdown.
+Do NOT use code fences.
+Do NOT add any text outside the JSON.
 
-RATIONALE:
-
-Give one short sentence explaining the classification.
-
-RETURN ONLY VALID JSON.
-
-Do not use markdown.
-Do not add explanations outside JSON.
-
-Use exactly this structure:
+Return exactly this structure:
 
 {
   "sentiment": "NEG",
   "sentimentScore": -0.75,
   "themes": ["Delivery"],
   "featureArea": "Delivery",
-  "rationale": "The customer is unhappy because the delivery was significantly delayed."
+  "rationale": "The customer is unhappy because the delivery was delayed."
 }
 `;
 
-  const response =
-    await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+  /*
+   * ---------------------------------------------------
+   * GEMINI REQUEST
+   * ---------------------------------------------------
+   */
 
-      max_tokens: 500,
+  let lastError: unknown = null;
 
-      messages: [
-        {
-          role: "user",
-          content: prompt,
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      console.log(
+        `Gemini classification attempt ${attempt}/3`
+      );
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+
+        contents: prompt,
+
+        config: {
+          temperature: 0.2,
+          maxOutputTokens: 1000,
+          responseMimeType: "application/json",
         },
-      ],
-    });
+      });
 
-  const text = response.content
-    .filter(
-      (block) => block.type === "text"
-    )
-    .map(
-      (block) => block.text
-    )
-    .join("")
-    .trim();
+      /*
+       * -------------------------------------------------
+       * RESPONSE TEXT
+       * -------------------------------------------------
+       */
 
-  const cleaned = text
-    .replace(
-      /^```json\s*/i,
-      ""
-    )
-    .replace(
-      /^```\s*/i,
-      ""
-    )
-    .replace(
-      /\s*```$/i,
-      ""
-    )
-    .trim();
+      const text = response.text?.trim();
 
-  let parsed: unknown;
+      if (!text) {
+        throw new Error(
+          "Gemini returned an empty response."
+        );
+      }
 
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (error) {
-    console.error(
-      "AI JSON parsing failed:",
-      cleaned
-    );
+      console.log(
+        `Gemini classification succeeded on attempt ${attempt}`
+      );
 
-    throw new Error(
-      "AI returned invalid JSON"
-    );
+      console.log(
+        "Gemini classification response:",
+        text
+      );
+
+      /*
+       * -------------------------------------------------
+       * CLEAN RESPONSE
+       * -------------------------------------------------
+       */
+
+      let cleaned = text
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+
+      /*
+       * -------------------------------------------------
+       * EXTRACT JSON OBJECT
+       * -------------------------------------------------
+       */
+
+      const firstBrace = cleaned.indexOf("{");
+      const lastBrace = cleaned.lastIndexOf("}");
+
+      if (
+        firstBrace !== -1 &&
+        lastBrace !== -1 &&
+        lastBrace > firstBrace
+      ) {
+        cleaned = cleaned.slice(
+          firstBrace,
+          lastBrace + 1
+        );
+      }
+
+      /*
+       * -------------------------------------------------
+       * PARSE JSON
+       * -------------------------------------------------
+       */
+
+      let parsed: unknown;
+
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        console.error(
+          "Gemini JSON parsing failed:"
+        );
+
+        console.error(cleaned);
+
+        throw new Error(
+          "Gemini returned invalid JSON."
+        );
+      }
+
+      /*
+       * -------------------------------------------------
+       * VALIDATE RESPONSE
+       * -------------------------------------------------
+       */
+
+      const validation =
+        classificationSchema.safeParse(parsed);
+
+      if (!validation.success) {
+        console.error(
+          "Gemini response validation failed:"
+        );
+
+        console.error(
+          validation.error.issues
+        );
+
+        throw new Error(
+          "Gemini returned incomplete classification data."
+        );
+      }
+
+      /*
+       * -------------------------------------------------
+       * NORMALIZE THEMES
+       * -------------------------------------------------
+       */
+
+      const themes = validation.data.themes
+        .map((theme) => theme.trim())
+        .filter(Boolean);
+
+      if (themes.length === 0) {
+        throw new Error(
+          "Gemini returned no valid themes."
+        );
+      }
+
+      /*
+       * -------------------------------------------------
+       * FINAL RESULT
+       * -------------------------------------------------
+       */
+
+      return {
+        sentiment:
+          validation.data.sentiment,
+
+        sentimentScore:
+          validation.data.sentimentScore,
+
+        themes,
+
+        featureArea:
+          validation.data.featureArea ?? null,
+
+        rationale:
+          validation.data.rationale.trim(),
+      };
+    } catch (error) {
+      lastError = error;
+
+      console.error(
+        `Gemini classification attempt ${attempt} failed:`,
+        error
+      );
+
+      if (attempt < 3) {
+        const delay = attempt * 1500;
+
+        console.log(
+          `Retrying Gemini in ${delay / 1000} seconds...`
+        );
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, delay);
+        });
+      }
+    }
   }
 
-  return classificationSchema.parse(
-    parsed
+  /*
+   * ---------------------------------------------------
+   * ALL ATTEMPTS FAILED
+   * ---------------------------------------------------
+   */
+
+  console.error(
+    "Gemini classification failed after 3 attempts:",
+    lastError
+  );
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+
+  throw new Error(
+    "Gemini classification failed."
   );
 }
