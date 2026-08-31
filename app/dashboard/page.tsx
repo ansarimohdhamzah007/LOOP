@@ -15,7 +15,6 @@ export default async function DashboardPage() {
 
   const workspaceId = session.user.workspaceId;
 
-  // Get all feedback for the logged-in user's workspace
   const feedback = await prisma.feedback.findMany({
     where: {
       workspaceId,
@@ -26,9 +25,9 @@ export default async function DashboardPage() {
     take: 100,
   });
 
-  // -----------------------------
-  // Analytics
-  // -----------------------------
+  // =====================================================
+  // ANALYTICS
+  // =====================================================
 
   const totalFeedback = feedback.length;
 
@@ -63,66 +62,98 @@ export default async function DashboardPage() {
   const averageSentimentScore =
     scoredFeedback.length > 0
       ? scoredFeedback.reduce(
-          (total, item) => total + (item.sentimentScore ?? 0),
+          (total, item) =>
+            total + (item.sentimentScore ?? 0),
           0
         ) / scoredFeedback.length
       : null;
 
-  // Convert score to percentage
   const averageScorePercentage =
     averageSentimentScore !== null
       ? Math.round(averageSentimentScore * 100)
       : null;
-
-  // -----------------------------
-  // Helper
-  // -----------------------------
 
   function percentage(count: number) {
     if (totalFeedback === 0) {
       return 0;
     }
 
-    return Math.round((count / totalFeedback) * 100);
+    return Math.round(
+      (count / totalFeedback) * 100
+    );
   }
 
   return (
     <main className="min-h-screen bg-zinc-100 p-6 md:p-8">
       <div className="mx-auto max-w-7xl">
 
-        {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        {/* =====================================================
+            HEADER
+        ===================================================== */}
+
+        <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+
           <div>
             <h1 className="text-3xl font-bold text-zinc-900">
               LOOP Dashboard
             </h1>
 
             <p className="mt-2 text-zinc-500">
-              Feedback management workspace
+              Feedback management and customer insights workspace
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* NAVIGATION */}
+
+          <nav className="flex flex-wrap items-center gap-2">
+
+            <Link
+              href="/dashboard"
+              className="rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white"
+            >
+              Dashboard
+            </Link>
+
             <Link
               href="/feedback"
-              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
             >
               Feedback
             </Link>
 
             <Link
+              href="/themes"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+            >
+              Themes
+            </Link>
+
+            <Link
+              href="/trends"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+            >
+              Trends
+            </Link>
+
+            <Link
               href="/reports"
-              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+              className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
             >
               Reports
             </Link>
 
             <LogoutButton />
-          </div>
+
+          </nav>
+
         </div>
 
-        {/* User Information */}
+        {/* =====================================================
+            WORKSPACE INFORMATION
+        ===================================================== */}
+
         <div className="mb-8 rounded-2xl bg-white p-6 shadow-sm">
+
           <h2 className="mb-5 text-lg font-semibold text-zinc-900">
             Workspace Information
           </h2>
@@ -172,7 +203,10 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Analytics Heading */}
+        {/* =====================================================
+            ANALYTICS
+        ===================================================== */}
+
         <div className="mb-4">
           <h2 className="text-xl font-bold text-zinc-900">
             Feedback Analytics
@@ -183,10 +217,10 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        {/* Main Analytics Cards */}
+        {/* MAIN ANALYTICS */}
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
-          {/* Total */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Total Feedback
@@ -201,7 +235,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Positive */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Positive
@@ -216,7 +249,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Neutral */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Neutral
@@ -231,7 +263,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Negative */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Negative
@@ -248,10 +279,10 @@ export default async function DashboardPage() {
 
         </div>
 
-        {/* Second Analytics Row */}
+        {/* SECOND ANALYTICS ROW */}
+
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
-          {/* NEW */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               New
@@ -266,7 +297,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* REVIEWED */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Reviewed
@@ -281,7 +311,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* ACTIONED */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Actioned
@@ -296,7 +325,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Average Score */}
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <p className="text-sm font-medium text-zinc-500">
               Avg. Sentiment Score
@@ -315,7 +343,10 @@ export default async function DashboardPage() {
 
         </div>
 
-        {/* Sentiment Distribution */}
+        {/* =====================================================
+            SENTIMENT DISTRIBUTION
+        ===================================================== */}
+
         <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
 
           <div className="mb-6">
@@ -330,9 +361,11 @@ export default async function DashboardPage() {
 
           <div className="space-y-5">
 
-            {/* Positive */}
+            {/* POSITIVE */}
+
             <div>
               <div className="mb-2 flex items-center justify-between">
+
                 <span className="text-sm font-medium text-zinc-700">
                   Positive
                 </span>
@@ -340,21 +373,26 @@ export default async function DashboardPage() {
                 <span className="text-sm text-zinc-500">
                   {positiveCount} ({percentage(positiveCount)}%)
                 </span>
+
               </div>
 
               <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+
                 <div
                   className="h-full rounded-full bg-green-500"
                   style={{
                     width: `${percentage(positiveCount)}%`,
                   }}
                 />
+
               </div>
             </div>
 
-            {/* Neutral */}
+            {/* NEUTRAL */}
+
             <div>
               <div className="mb-2 flex items-center justify-between">
+
                 <span className="text-sm font-medium text-zinc-700">
                   Neutral
                 </span>
@@ -362,21 +400,26 @@ export default async function DashboardPage() {
                 <span className="text-sm text-zinc-500">
                   {neutralCount} ({percentage(neutralCount)}%)
                 </span>
+
               </div>
 
               <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+
                 <div
                   className="h-full rounded-full bg-yellow-400"
                   style={{
                     width: `${percentage(neutralCount)}%`,
                   }}
                 />
+
               </div>
             </div>
 
-            {/* Negative */}
+            {/* NEGATIVE */}
+
             <div>
               <div className="mb-2 flex items-center justify-between">
+
                 <span className="text-sm font-medium text-zinc-700">
                   Negative
                 </span>
@@ -384,22 +427,28 @@ export default async function DashboardPage() {
                 <span className="text-sm text-zinc-500">
                   {negativeCount} ({percentage(negativeCount)}%)
                 </span>
+
               </div>
 
               <div className="h-3 overflow-hidden rounded-full bg-zinc-100">
+
                 <div
                   className="h-full rounded-full bg-red-500"
                   style={{
                     width: `${percentage(negativeCount)}%`,
                   }}
                 />
+
               </div>
             </div>
 
           </div>
         </div>
 
-        {/* Recent Feedback */}
+        {/* =====================================================
+            RECENT FEEDBACK
+        ===================================================== */}
+
         <div className="mt-8 rounded-2xl bg-white shadow-sm">
 
           <div className="flex items-center justify-between border-b border-zinc-100 p-6">
@@ -424,13 +473,17 @@ export default async function DashboardPage() {
           </div>
 
           {feedback.length === 0 ? (
+
             <div className="p-10 text-center text-sm text-zinc-500">
               No feedback available yet.
             </div>
+
           ) : (
+
             <div className="divide-y divide-zinc-100">
 
               {feedback.slice(0, 5).map((item) => (
+
                 <div
                   key={item.id}
                   className="p-5 hover:bg-zinc-50"
@@ -439,11 +492,13 @@ export default async function DashboardPage() {
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 
                     <div className="min-w-0">
+
                       <p className="line-clamp-2 text-sm font-medium text-zinc-900">
                         {item.content}
                       </p>
 
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+
                         <span>
                           {item.customerLabel || "Unknown customer"}
                         </span>
@@ -453,7 +508,9 @@ export default async function DashboardPage() {
                         <span>
                           {item.channel}
                         </span>
+
                       </div>
+
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
@@ -481,49 +538,112 @@ export default async function DashboardPage() {
                   </div>
 
                 </div>
+
               ))}
 
             </div>
+
           )}
 
         </div>
 
-        {/* Quick Actions */}
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
+        {/* =====================================================
+            QUICK NAVIGATION
+        ===================================================== */}
 
-          <Link
-            href="/feedback"
-            className="rounded-2xl bg-zinc-900 p-6 text-white shadow-sm transition hover:bg-zinc-800"
-          >
-            <h3 className="text-lg font-semibold">
-              Manage Feedback
-            </h3>
+        <div className="mt-8">
 
-            <p className="mt-2 text-sm text-zinc-300">
-              Add, search and manage customer feedback.
-            </p>
+          <h2 className="mb-4 text-xl font-bold text-zinc-900">
+            Explore LOOP
+          </h2>
 
-            <p className="mt-4 text-sm font-medium">
-              Open Feedback →
-            </p>
-          </Link>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
-          <Link
-            href="/reports"
-            className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition hover:bg-zinc-50"
-          >
-            <h3 className="text-lg font-semibold text-zinc-900">
-              Reports & Analytics
-            </h3>
+            {/* FEEDBACK */}
 
-            <p className="mt-2 text-sm text-zinc-500">
-              View detailed analytics and generate reports.
-            </p>
+            <Link
+              href="/feedback"
+              className="rounded-2xl bg-zinc-900 p-6 text-white shadow-sm transition hover:bg-zinc-800"
+            >
 
-            <p className="mt-4 text-sm font-medium text-zinc-900">
-              Open Reports →
-            </p>
-          </Link>
+              <h3 className="text-lg font-semibold">
+                Feedback
+              </h3>
+
+              <p className="mt-2 text-sm text-zinc-300">
+                Add, search and manage customer feedback.
+              </p>
+
+              <p className="mt-4 text-sm font-medium">
+                Open Feedback →
+              </p>
+
+            </Link>
+
+            {/* THEMES */}
+
+            <Link
+              href="/themes"
+              className="rounded-2xl bg-white p-6 shadow-sm transition hover:bg-zinc-50"
+            >
+
+              <h3 className="text-lg font-semibold text-zinc-900">
+                Themes
+              </h3>
+
+              <p className="mt-2 text-sm text-zinc-500">
+                Explore AI-generated feedback themes and categories.
+              </p>
+
+              <p className="mt-4 text-sm font-medium text-zinc-900">
+                Open Themes →
+              </p>
+
+            </Link>
+
+            {/* TRENDS */}
+
+            <Link
+              href="/trends"
+              className="rounded-2xl bg-white p-6 shadow-sm transition hover:bg-zinc-50"
+            >
+
+              <h3 className="text-lg font-semibold text-zinc-900">
+                Trends
+              </h3>
+
+              <p className="mt-2 text-sm text-zinc-500">
+                Analyze sentiment and customer feedback trends.
+              </p>
+
+              <p className="mt-4 text-sm font-medium text-zinc-900">
+                Open Trends →
+              </p>
+
+            </Link>
+
+            {/* REPORTS */}
+
+            <Link
+              href="/reports"
+              className="rounded-2xl bg-white p-6 shadow-sm transition hover:bg-zinc-50"
+            >
+
+              <h3 className="text-lg font-semibold text-zinc-900">
+                Reports
+              </h3>
+
+              <p className="mt-2 text-sm text-zinc-500">
+                Generate and review customer feedback reports.
+              </p>
+
+              <p className="mt-4 text-sm font-medium text-zinc-900">
+                Open Reports →
+              </p>
+
+            </Link>
+
+          </div>
 
         </div>
 
